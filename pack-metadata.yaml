@@ -1,0 +1,14 @@
+# Nebari software-pack metadata.
+# Schema: https://github.com/nebari-dev/software-pack-dashboard/blob/main/schema/pack-metadata.schema.json
+name: mobula-pack
+display_name: Mobula Pack
+description: FOSS control plane for Ray clusters - per-user SSO, RBAC, and a federating job gateway
+level: experimental
+owner: brandonrc
+deprecated: false
+product_owner: null
+nebariapp_integration: full
+scope:
+  standalone-supported: yes
+links:
+  docs: https://github.com/brandonrc/mobula/blob/main/docs/ARCHITECTURE.md

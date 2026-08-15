@@ -1,0 +1,18 @@
+{{- if .Values.nebariApp.enabled }}
+# Routing/TLS/landing registration for the Mobula API itself.
+# auth stays false by design (Mobula ADR-0003): SecurityPolicy redirect-OIDC
+# would break bearer clients like `ray job submit`; Mobula enforces auth
+# in-process. Per-cluster gateway hostnames get their own NebariApps.
+apiVersion: nebari.dev/v1alpha1
+kind: NebariApp
+metadata:
+  name: {{ include "mobula.name" . }}
+  labels: {{- include "mobula.labels" . | nindent 4 }}
+spec:
+  hostname: {{ .Values.nebariApp.hostname | quote }}
+  service:
+    name: {{ include "mobula.name" . }}
+    port: 8484
+  auth:
+    enabled: {{ .Values.nebariApp.auth }}
+{{- end }}

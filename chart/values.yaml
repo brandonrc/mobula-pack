@@ -1,0 +1,35 @@
+image:
+  repository: ghcr.io/brandonrc/mobula
+  tag: ""            # defaults to appVersion
+  pullPolicy: IfNotPresent
+
+bind: 0.0.0.0:8484
+
+# Static cluster registry (Phase 1). Rendered into clusters.toml.
+# Tokens should come from existingSecret in real deployments.
+clusters: []
+# - id: demo
+#   hostname: demo.ray.example.com
+#   api_base_url: http://demo-kuberay-head-svc.demo.svc:8265
+
+# Name of a Secret whose keys are cluster ids and values are Ray tokens.
+# Merged into the registry at startup (pending mobula support; see
+# https://github.com/brandonrc/mobula issues). Until then tokens may be
+# inlined under clusters[].auth_token (dev only).
+existingTokenSecret: ""
+
+nebariApp:
+  enabled: true
+  # Hostname for the Mobula API/UI itself. Per-cluster gateway hostnames
+  # are additional NebariApps, one per registry entry.
+  hostname: mobula.example.com
+  # ADR-0003: Mobula enforces bearer auth in-process; SecurityPolicy
+  # redirect-OIDC must stay off for API traffic.
+  auth: false
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi

@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mobula.name" . }}
+  labels: {{- include "mobula.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "mobula.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels: {{- include "mobula.labels" . | nindent 8 }}
+      annotations:
+        checksum/registry: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      containers:
+        - name: mobula
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - serve
+            - --bind={{ .Values.bind }}
+            - --registry=/etc/mobula/clusters.toml
+          ports:
+            - name: http
+              containerPort: 8484
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          volumeMounts:
+            - name: registry
+              mountPath: /etc/mobula
+              readOnly: true
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: registry
+          configMap:
+            name: {{ include "mobula.name" . }}-registry
