@@ -20,14 +20,13 @@ API clients.
 
 ## Status
 
-Scaffold. Blocked on the first published Mobula container image
-(`ghcr.io/brandonrc/mobula`); the image-publish workflow lands in the main
-repo. Until then, install with a locally built image:
+Working scaffold. The image is published: `ghcr.io/brandonrc/mobula:latest`
+(multi-arch amd64/arm64, UBI9-micro, Trivy-gated, runs as uid 1001 with the
+restricted pod-security profile). If the GHCR package is private, either
+flip it to public in the package settings or configure an imagePullSecret.
 
 ```bash
-docker build -t mobula:dev ../mobula   # Dockerfile lands with the image workflow
-helm install mobula ./chart -n mobula --create-namespace \
-  --set image.repository=mobula --set image.tag=dev
+helm install mobula ./chart -n mobula --create-namespace
 ```
 
 ## License
