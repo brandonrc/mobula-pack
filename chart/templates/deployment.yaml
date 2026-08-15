@@ -15,10 +15,21 @@ spec:
       annotations:
         checksum/registry: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
+      # Restricted pod-security profile (Mobula ADR-0008: STIG posture).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: mobula
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           args:
             - serve
             - --bind={{ .Values.bind }}
