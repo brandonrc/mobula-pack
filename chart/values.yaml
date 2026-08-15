@@ -5,6 +5,15 @@ image:
 
 bind: 0.0.0.0:8484
 
+# Mobula (pre-Phase 2) has no caller authentication and refuses non-loopback
+# binds unless this is set. In Nebari the NetworkPolicy + Envoy boundary is
+# the interim control; flip to false the moment Phase 2 identity ships.
+devAllowUnauthenticated: true
+
+# Permit auth tokens over cleartext http:// southbound (in-cluster head
+# services are typically http; tokens ride inside the cluster network).
+allowInsecureTransport: true
+
 # Static cluster registry (Phase 1). Rendered into clusters.toml.
 # Tokens should come from existingSecret in real deployments.
 clusters: []
