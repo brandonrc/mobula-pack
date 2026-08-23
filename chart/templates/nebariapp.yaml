@@ -1,18 +1,89 @@
-{{- if .Values.nebariApp.enabled }}
-# Routing/TLS/landing registration for the Mobula API itself.
-# auth stays false by design (Mobula ADR-0003): SecurityPolicy redirect-OIDC
-# would break bearer clients like `ray job submit`; Mobula enforces auth
-# in-process. Per-cluster gateway hostnames get their own NebariApps.
-apiVersion: nebari.dev/v1alpha1
+{{/*
+  NebariApp CRs (reconcilers.nebari.dev/v1) — on a Nebari cluster the
+  nebari-operator turns each into an HTTPRoute on the shared Envoy Gateway
+  plus a cert-manager TLS certificate for the hostname.
+
+  Gateway-level OIDC (spec.auth) stays OFF for both apps by default:
+    - api: Mobula enforces Bearer auth in-process (ADR-0003). An Envoy
+      redirect-to-Keycloak SecurityPolicy would answer `ray job submit` /
+      `mobula` CLI requests with an HTML login redirect.
+    - ui: the SPA runs its own sign-in (PKCE against Keycloak, or the
+      local-auth form) and bearers its own API calls.
+*/}}
+{{- if .Values.nebariApp.api.enabled }}
+apiVersion: reconcilers.nebari.dev/v1
 kind: NebariApp
 metadata:
-  name: {{ include "mobula.name" . }}
+  name: {{ include "mobula.name" . }}-api
+  namespace: {{ .Release.Namespace }}
   labels: {{- include "mobula.labels" . | nindent 4 }}
 spec:
-  hostname: {{ .Values.nebariApp.hostname | quote }}
+  hostname: {{ required "nebariApp.api.hostname is required when nebariApp.api.enabled" .Values.nebariApp.api.hostname }}
   service:
     name: {{ include "mobula.name" . }}
     port: 8484
+  # Without spec.routing the operator creates no HTTPRoute and the hostname
+  # 404s (RoutingNotConfigured).
+  routing:
+    routes:
+      - pathPrefix: /
+        pathType: PathPrefix
   auth:
-    enabled: {{ .Values.nebariApp.auth }}
+    enabled: {{ .Values.nebariApp.api.auth.enabled | default false }}
+  {{- with .Values.nebariApp.api.gateway }}
+  gateway: {{ . }}
+  {{- end }}
+{{- end }}
+{{- if and .Values.ui.enabled .Values.nebariApp.ui.enabled }}
+---
+apiVersion: reconcilers.nebari.dev/v1
+kind: NebariApp
+metadata:
+  name: {{ include "mobula.ui.name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "mobula.ui.labels" . | nindent 4 }}
+spec:
+  hostname: {{ required "nebariApp.ui.hostname is required when nebariApp.ui.enabled" .Values.nebariApp.ui.hostname }}
+  service:
+    name: {{ include "mobula.ui.name" . }}
+    port: 80
+  routing:
+    routes:
+      - pathPrefix: /
+        pathType: PathPrefix
+  auth:
+    enabled: {{ .Values.nebariApp.ui.auth.enabled | default false }}
+  {{- with .Values.nebariApp.ui.gateway }}
+  gateway: {{ . }}
+  {{- end }}
+  {{- with .Values.nebariApp.ui.landingPage }}
+  {{- if .enabled }}
+  landingPage:
+    enabled: true
+    displayName: {{ .displayName | quote }}
+    description: {{ .description | quote }}
+    {{- with .icon }}
+    icon: {{ . | quote }}
+    {{- end }}
+    {{- with .category }}
+    category: {{ . | quote }}
+    {{- end }}
+    {{- with .priority }}
+    priority: {{ . }}
+    {{- end }}
+    {{- with .healthCheck }}
+    healthCheck:
+      enabled: {{ .enabled | default false }}
+      {{- with .path }}
+      path: {{ . | quote }}
+      {{- end }}
+      {{- with .intervalSeconds }}
+      intervalSeconds: {{ . }}
+      {{- end }}
+      {{- with .timeoutSeconds }}
+      timeoutSeconds: {{ . }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+  {{- end }}
 {{- end }}
