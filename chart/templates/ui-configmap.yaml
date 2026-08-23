@@ -1,0 +1,45 @@
+{{- if .Values.ui.enabled }}
+# The ui image bakes an nginx.conf that proxies /api/ to `http://mobula:8484`
+# — its docker-compose service name, which does not exist here. This rendered
+# copy (mounted over /etc/nginx/conf.d/default.conf) keeps the image's proxy
+# and WebSocket rules verbatim but targets this release's mobula Service by
+# its in-cluster DNS name.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "mobula.ui.name" . }}-nginx
+  labels: {{- include "mobula.ui.labels" . | nindent 4 }}
+data:
+  default.conf: |
+    server {
+        listen 80;
+        server_name _;
+        root /usr/share/nginx/html;
+        index index.html;
+
+        # Control-plane API + health + Swagger UI -> the mobula Service.
+        location /api/ {
+            proxy_pass http://{{ include "mobula.name" . }}.{{ .Release.Namespace }}.svc:8484;
+            proxy_set_header Host $host;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            # WebSocket upgrade for the log-tail bridge.
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_read_timeout 3600s;
+        }
+        location = /healthz {
+            proxy_pass http://{{ include "mobula.name" . }}.{{ .Release.Namespace }}.svc:8484;
+        }
+        location /docs {
+            proxy_pass http://{{ include "mobula.name" . }}.{{ .Release.Namespace }}.svc:8484;
+            proxy_set_header Host $host;
+        }
+
+        # SPA client-side routing: everything else falls back to index.html.
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+    }
+{{- end }}
