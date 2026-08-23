@@ -1,3 +1,7 @@
+{{- if .Values.clusters }}
+# Static cluster registry for the job gateway. Prefer auth_token_env (the
+# name of an env var supplied by registryTokenSecret) over inlining a
+# plaintext auth_token here — this is a ConfigMap, not a Secret.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -10,7 +14,10 @@ data:
     id = {{ .id | quote }}
     hostname = {{ .hostname | quote }}
     api_base_url = {{ .api_base_url | quote }}
-    {{- if .auth_token }}
+    {{- if .auth_token_env }}
+    auth_token_env = {{ .auth_token_env | quote }}
+    {{- else if .auth_token }}
     auth_token = {{ .auth_token | quote }}
     {{- end }}
     {{- end }}
+{{- end }}

@@ -1,0 +1,13 @@
+{{- if .Values.policy.enabled }}
+# Boot-time governance policy ([prices]/[quotas]/[gpu]/[pod_shaping]),
+# passed to `mobula serve --policy`. Seeds the store's policy row; the store
+# wins once edited via PUT /api/v1/settings/policy.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "mobula.name" . }}-policy
+  labels: {{- include "mobula.labels" . | nindent 4 }}
+data:
+  policy.toml: |
+    {{- .Values.policy.toml | nindent 4 }}
+{{- end }}
