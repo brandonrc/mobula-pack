@@ -1,0 +1,80 @@
+{{- if and .Values.kuberay.enabled .Values.rbac.create }}
+{{- $kuberayNs := include "mobula.kuberayNamespace" . }}
+# RBAC for the lifecycle path (--kuberay-namespace). Derived from the exact
+# API calls in mobula's crates/mobula-provision:
+#
+#   kuberay_client.rs (namespaced, in the kuberay namespace):
+#     - ray.io/v1 RayCluster:  get (observe), list (managed-by selector),
+#       patch (server-side apply — creation via SSA also needs create),
+#       delete (terminate)
+#     - ray.io/v1 RayService:  same set (Serve service deploy/get/list/delete)
+#     - networking.k8s.io/v1 NetworkPolicy: list (posture check), create +
+#       patch (SSA of default-deny + tenant-allow policies)
+#   kuberay_client.rs (cluster-scoped):
+#     - core/v1 Namespace: get + patch (PSS labels), restricted by
+#       resourceName to the kuberay namespace
+#   kueue_client.rs (kueue.x-k8s.io/v1beta2; ADR-0010 pool objects):
+#     - Cohort / ResourceFlavor / ClusterQueue: cluster-scoped SSA + teardown
+#     - LocalQueue: namespaced objects, but listed ACROSS all namespaces by
+#       pool label (delete_pool/observe_pool), so granted cluster-wide here
+#
+# No watch verbs: mobula polls (get/list) on its reconcile interval.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "mobula.name" . }}-kuberay
+  namespace: {{ $kuberayNs }}
+  labels: {{- include "mobula.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["ray.io"]
+    resources: ["rayclusters", "rayservices"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "list", "create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "mobula.name" . }}-kuberay
+  namespace: {{ $kuberayNs }}
+  labels: {{- include "mobula.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "mobula.name" . }}-kuberay
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "mobula.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+---
+# Cluster-scoped: namespace PSS labels (name-restricted) + Kueue objects.
+# Named with the release namespace so two installs never collide.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Namespace }}-{{ include "mobula.name" . }}
+  labels: {{- include "mobula.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    resourceNames: [{{ $kuberayNs | quote }}]
+    verbs: ["get", "patch"]
+  - apiGroups: ["kueue.x-k8s.io"]
+    resources: ["cohorts", "resourceflavors", "clusterqueues", "localqueues"]
+    verbs: ["get", "list", "create", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-{{ include "mobula.name" . }}
+  labels: {{- include "mobula.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Namespace }}-{{ include "mobula.name" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "mobula.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

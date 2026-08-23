@@ -1,6 +1,7 @@
 apiVersion: v2
 name: mobula-pack
-description: Mobula control plane for Ray clusters, packaged for Nebari
+description: Mobula control plane for Ray clusters + dashboard, packaged for Nebari
 type: application
-version: 0.0.1
-appVersion: "0.0.1"
+version: 0.1.0
+# Informational; the deployed image is picked by image.tag (default "latest").
+appVersion: "latest"

@@ -1,3 +1,4 @@
+{{- include "mobula.validateAuth" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -5,6 +6,11 @@ metadata:
   labels: {{- include "mobula.labels" . | nindent 4 }}
 spec:
   replicas: 1
+  # Recreate, not RollingUpdate: state is SQLite on an RWO PVC — a second
+  # writer during a roll would either fail to attach the volume or corrupt
+  # the database.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "mobula.name" . }}
@@ -14,11 +20,16 @@ spec:
       labels: {{- include "mobula.labels" . | nindent 8 }}
       annotations:
         checksum/registry: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/auth: {{ include (print $.Template.BasePath "/auth-configmap.yaml") . | sha256sum }}
+        checksum/policy: {{ include (print $.Template.BasePath "/policy-configmap.yaml") . | sha256sum }}
     spec:
+      serviceAccountName: {{ include "mobula.serviceAccountName" . }}
       # Restricted pod-security profile (Mobula ADR-0008: STIG posture).
+      # fsGroup makes the PVC writable for the non-root uid.
       securityContext:
         runAsNonRoot: true
         runAsUser: 1001
+        fsGroup: 1001
         seccompProfile:
           type: RuntimeDefault
       containers:
@@ -33,13 +44,45 @@ spec:
           args:
             - serve
             - --bind={{ .Values.bind }}
-            - --registry=/etc/mobula/clusters.toml
-            {{- if .Values.devAllowUnauthenticated }}
+            {{- if .Values.clusters }}
+            - --registry=/etc/mobula/registry/clusters.toml
+            {{- end }}
+            {{- if eq .Values.auth.mode "oidc" }}
+            - --auth-config=/etc/mobula/auth/auth.toml
+            {{- else if eq .Values.auth.mode "local" }}
+            - --local-auth
+            {{- else }}
+            # auth.mode=none, explicitly confirmed via
+            # auth.dangerousDevAllowUnauthenticated (validated in _helpers).
             - --dev-allow-unauthenticated
             {{- end }}
             {{- if .Values.allowInsecureTransport }}
             - --allow-insecure-transport
             {{- end }}
+            - --db=/data/mobula.db
+            {{- if .Values.auditLog.enabled }}
+            - --audit-log=/data/audit.jsonl
+            {{- end }}
+            {{- if .Values.kuberay.enabled }}
+            - --kuberay-namespace={{ include "mobula.kuberayNamespace" . }}
+            {{- end }}
+            {{- if .Values.policy.enabled }}
+            - --policy=/etc/mobula/policy/policy.toml
+            {{- end }}
+          {{- if and (eq .Values.auth.mode "local") .Values.auth.local.existingSecret }}
+          env:
+            - name: MOBULA_LOCAL_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.local.existingSecret }}
+                  key: {{ .Values.auth.local.passwordKey | default "MOBULA_LOCAL_ADMIN_PASSWORD" }}
+          {{- end }}
+          {{- if .Values.registryTokenSecret }}
+          # Secret keys become env vars; clusters[].auth_token_env names them.
+          envFrom:
+            - secretRef:
+                name: {{ .Values.registryTokenSecret }}
+          {{- end }}
           ports:
             - name: http
               containerPort: 8484
@@ -52,11 +95,44 @@ spec:
               path: /healthz
               port: http
           volumeMounts:
+            - name: data
+              mountPath: /data
+            {{- if .Values.clusters }}
             - name: registry
-              mountPath: /etc/mobula
+              mountPath: /etc/mobula/registry
               readOnly: true
+            {{- end }}
+            {{- if eq .Values.auth.mode "oidc" }}
+            - name: auth
+              mountPath: /etc/mobula/auth
+              readOnly: true
+            {{- end }}
+            {{- if .Values.policy.enabled }}
+            - name: policy
+              mountPath: /etc/mobula/policy
+              readOnly: true
+            {{- end }}
           resources: {{- toYaml .Values.resources | nindent 12 }}
       volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "mobula.name" . }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- if .Values.clusters }}
         - name: registry
           configMap:
             name: {{ include "mobula.name" . }}-registry
+        {{- end }}
+        {{- if eq .Values.auth.mode "oidc" }}
+        - name: auth
+          configMap:
+            name: {{ include "mobula.name" . }}-auth
+        {{- end }}
+        {{- if .Values.policy.enabled }}
+        - name: policy
+          configMap:
+            name: {{ include "mobula.name" . }}-policy
+        {{- end }}

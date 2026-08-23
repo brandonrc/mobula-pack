@@ -1,40 +1,136 @@
+# ============================================================================
+# Mobula control plane
+# ============================================================================
+
 image:
   repository: ghcr.io/brandonrc/mobula
-  tag: ""            # defaults to appVersion
+  # "latest" works for evaluation; production installs should pin a digest
+  # (tag: "latest@sha256:...") or a release tag so upgrades are deliberate.
+  tag: "latest"
   pullPolicy: IfNotPresent
 
 bind: 0.0.0.0:8484
 
-# Mobula (pre-Phase 2) has no caller authentication and refuses non-loopback
-# binds unless this is set. In Nebari the NetworkPolicy + Envoy boundary is
-# the interim control; flip to false the moment Phase 2 identity ships.
-devAllowUnauthenticated: true
+# --- Authentication ---------------------------------------------------------
+# auth.mode selects how callers authenticate to the control plane:
+#   oidc  - (default) validate Bearer JWTs against auth.oidc.* (Keycloak on a
+#           Nebari cluster). Rendered into auth.toml and passed --auth-config.
+#   local - IdP-free username/password auth (ADR-0011): --local-auth. On first
+#           boot an `admin` user is bootstrapped; the password comes from
+#           MOBULA_LOCAL_ADMIN_PASSWORD when auth.local.existingSecret is set,
+#           otherwise it is generated, printed once to the log, and written
+#           0600 next to the database (/data/local-admin-password).
+#   none  - NO caller authentication. Anyone who can reach the port can run
+#           code on every registered cluster. Refused unless
+#           auth.dangerousDevAllowUnauthenticated is explicitly true.
+auth:
+  mode: oidc
+  oidc:
+    # OIDC issuer; {issuer}/.well-known/openid-configuration must resolve.
+    # REPLACE this placeholder — mobula fails fast at boot (OIDC discovery)
+    # until it points at a real issuer, e.g. the Nebari Keycloak realm:
+    # https://nebari.example.com/auth/realms/nebari
+    issuer: https://keycloak.example.com/realms/nebari
+    # Required `aud` claim on presented JWTs (the Keycloak client id, or an
+    # audience mapped onto tokens for Mobula).
+    audience: mobula
+    # Claim carrying group memberships (Keycloak default: "groups").
+    groupsClaim: groups
+    # IdP group names -> Mobula roles. "*" matches any authenticated caller.
+    # Deny-by-default: a caller mapping to no role can authenticate but is
+    # authorized for nothing.
+    roles:
+      admin: []           # e.g. ["/platform-admins"]
+      operator: []        # e.g. ["/sre"]
+      developer: []       # e.g. ["/ml-eng"]
+      viewer: []          # e.g. ["*"]
+      auditor: []         # audit-trail readers (compliance)
+  local:
+    # Optional Secret providing the bootstrap admin password. The value of
+    # `passwordKey` in this Secret becomes MOBULA_LOCAL_ADMIN_PASSWORD.
+    # Leave empty to let Mobula generate one (logged once, written 0600 to
+    # /data/local-admin-password on the data volume).
+    existingSecret: ""
+    passwordKey: MOBULA_LOCAL_ADMIN_PASSWORD
+  # Must be set to true for auth.mode=none to render at all; templating fails
+  # otherwise so an unauthenticated control plane is never an accident.
+  dangerousDevAllowUnauthenticated: false
 
-# Permit auth tokens over cleartext http:// southbound (in-cluster head
-# services are typically http; tokens ride inside the cluster network).
+# Permit auth tokens over cleartext http:// southbound. Default true because
+# in-cluster Ray head services (http://<cluster>-head-svc...:8265) are plain
+# http and the tokens only ride the pod network inside the cluster boundary;
+# set false if every registered api_base_url is https.
 allowInsecureTransport: true
 
-# Static cluster registry (Phase 1). Rendered into clusters.toml.
-# Tokens should come from existingSecret in real deployments.
-clusters: []
-# - id: demo
-#   hostname: demo.ray.example.com
-#   api_base_url: http://demo-kuberay-head-svc.demo.svc:8265
-
-# Name of a Secret whose keys are cluster ids and values are Ray tokens.
-# Merged into the registry at startup (pending mobula support; see
-# https://github.com/brandonrc/mobula issues). Until then tokens may be
-# inlined under clusters[].auth_token (dev only).
-existingTokenSecret: ""
-
-nebariApp:
+# --- State ------------------------------------------------------------------
+# SQLite database on a PVC: desired cluster state, local-auth users/tokens,
+# usage history, and the editable policy row all live here. Disabling
+# persistence falls back to an emptyDir (state lost on pod replacement).
+# The deployment strategy is Recreate: SQLite on an RWO claim cannot have two
+# writers, so no rolling updates.
+persistence:
   enabled: true
-  # Hostname for the Mobula API/UI itself. Per-cluster gateway hostnames
-  # are additional NebariApps, one per registry entry.
-  hostname: mobula.example.com
-  # ADR-0003: Mobula enforces bearer auth in-process; SecurityPolicy
-  # redirect-OIDC must stay off for API traffic.
-  auth: false
+  size: 2Gi
+  # "" = the cluster default StorageClass (microk8s: microk8s-hostpath).
+  storageClass: ""
+
+# Append-only JSONL audit log (every proxied request + every authz denial),
+# written to /data/audit.jsonl on the data volume.
+auditLog:
+  enabled: false
+
+# --- Cluster lifecycle (KubeRay + Kueue) ------------------------------------
+# When enabled, Mobula manages RayCluster/RayService CRs via the KubeRay
+# operator and pool quota objects via the Kueue CRDs, and the chart creates
+# the ServiceAccount + RBAC this needs. Requires kuberay-operator on the
+# cluster (Kueue optional: pools degrade to in-process quota without it).
+kuberay:
+  enabled: true
+  # Namespace Mobula provisions RayClusters into. "" = the release namespace.
+  namespace: ""
+
+serviceAccount:
+  create: true
+  # "" = the chart name.
+  name: ""
+
+rbac:
+  # Create the Role/RoleBinding + ClusterRole/ClusterRoleBinding for the
+  # kuberay lifecycle path. Only rendered when kuberay.enabled.
+  create: true
+
+# --- Governance policy ------------------------------------------------------
+# Optional boot-time policy TOML ([prices], [quotas], [gpu], [pod_shaping]),
+# rendered verbatim into a ConfigMap and passed --policy. This SEEDS the
+# store's policy row; once edited via PUT /api/v1/settings/policy the store
+# wins. See deploy/policy.toml in the mobula repo for a full example.
+policy:
+  enabled: false
+  toml: ""
+  # toml: |
+  #   [prices]
+  #   cpu = 0.048
+  #   "nvidia.com/gpu" = 2.80
+  #   [quotas]
+  #   dev = { cpu = 500, memory = 1000, "nvidia.com/gpu" = 16 }
+
+# --- Static cluster registry (job gateway) ----------------------------------
+# Pre-registered Ray clusters for the federating job gateway (e.g. a shared
+# cluster deployed by rayserve-pack). Rendered into clusters.toml and passed
+# --registry; when empty the flag is omitted entirely.
+#
+# Tokens: prefer auth_token_env (the NAME of an env var read at startup) with
+# registryTokenSecret providing that variable — the token then never touches
+# a ConfigMap. auth_token (plaintext) is accepted for dev only.
+clusters: []
+# - id: shared
+#   hostname: ray.nebari.example.com
+#   api_base_url: http://rayserve-kuberay-head-svc.rayserve.svc:8265
+#   auth_token_env: SHARED_RAY_TOKEN
+
+# Name of a Secret whose keys become environment variables on the mobula
+# container (via envFrom). Point clusters[].auth_token_env at those keys.
+registryTokenSecret: ""
 
 resources:
   requests:
@@ -42,3 +138,73 @@ resources:
     memory: 128Mi
   limits:
     memory: 512Mi
+
+# ============================================================================
+# Mobula UI (dashboard)
+# ============================================================================
+# nginx-served SPA. The image's baked nginx.conf proxies /api/ to a hardcoded
+# `http://mobula:8484` (its docker-compose service name), so the chart mounts
+# its own rendered default.conf over it, pointing at this release's mobula
+# Service instead.
+#
+# Runtime configuration: the login page self-configures from the backend —
+# GET /api/v1/auth/providers (public, proxied through nginx) reports whether
+# local auth and/or OIDC SSO are available and which issuer to use, so
+# auth.mode/auth.oidc.issuer above flow through with no UI config needed.
+# Build-time-only knobs (no runtime override mechanism exists in the image):
+#   - VITE_MOBULA_ISSUER: only a fallback for backends predating the
+#     providers endpoint — irrelevant against a current mobula.
+#   - the SSO OAuth client id is the compiled-in constant "mobula": register
+#     a PUBLIC client with that id (PKCE, no secret) in Keycloak, with
+#     https://<ui hostname>/auth/callback as a valid redirect URI.
+ui:
+  enabled: true
+  image:
+    repository: ghcr.io/brandonrc/mobula-ui
+    # Same advice as the control plane: pin a digest in production.
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+# ============================================================================
+# Nebari integration (NebariApp CRs — reconcilers.nebari.dev/v1)
+# ============================================================================
+# Two apps: the API (for `mobula` CLI / `ray job submit` bearer clients) and
+# the dashboard UI. Both keep gateway OIDC OFF:
+#   - api: Mobula enforces bearer auth in-process (ADR-0003). An Envoy
+#     redirect-to-Keycloak SecurityPolicy would break every non-browser
+#     client (ray job submit, mobula CLI, curl) with an HTML login page.
+#   - ui: the SPA runs its own sign-in (Authorization Code + PKCE against
+#     Keycloak, or the local-auth form) and attaches the Bearer token to API
+#     calls itself; gateway-level OIDC would double-authenticate the browser
+#     while doing nothing for the API calls the page makes.
+nebariApp:
+  api:
+    enabled: false
+    hostname: ""            # e.g. mobula-api.nebari.example.com
+    auth:
+      enabled: false        # keep false — see note above (ADR-0003)
+    gateway: ""             # optional, e.g. "public"
+  ui:
+    enabled: false
+    hostname: ""            # e.g. mobula.nebari.example.com
+    auth:
+      enabled: false        # keep false — the SPA does its own OIDC login
+    gateway: ""
+    landingPage:
+      enabled: false
+      displayName: "Mobula"
+      description: "Control plane for Ray clusters: SSO, RBAC, quotas, and a federating job gateway"
+      icon: ""
+      category: "Compute"
+      priority: 20
+      healthCheck:
+        enabled: true
+        path: /healthz
+        intervalSeconds: 30
+        timeoutSeconds: 5

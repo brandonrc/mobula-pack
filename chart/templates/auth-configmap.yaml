@@ -1,0 +1,22 @@
+{{- if eq .Values.auth.mode "oidc" }}
+# OIDC auth config (Phase 2, ADR-0003): passed to `mobula serve
+# --auth-config`. Group->role mappings are deny-by-default; toJson renders
+# the value lists as TOML string arrays.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "mobula.name" . }}-auth
+  labels: {{- include "mobula.labels" . | nindent 4 }}
+data:
+  auth.toml: |
+    issuer = {{ .Values.auth.oidc.issuer | quote }}
+    audience = {{ .Values.auth.oidc.audience | quote }}
+    groups_claim = {{ .Values.auth.oidc.groupsClaim | default "groups" | quote }}
+
+    [roles]
+    admin = {{ .Values.auth.oidc.roles.admin | default list | toJson }}
+    operator = {{ .Values.auth.oidc.roles.operator | default list | toJson }}
+    developer = {{ .Values.auth.oidc.roles.developer | default list | toJson }}
+    viewer = {{ .Values.auth.oidc.roles.viewer | default list | toJson }}
+    auditor = {{ .Values.auth.oidc.roles.auditor | default list | toJson }}
+{{- end }}
