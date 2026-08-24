@@ -32,6 +32,12 @@ rules:
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
     verbs: ["get", "list", "create", "patch"]
+  # Read-only pod visibility for the nodes tab (mobula#91, api-v1 §5.3):
+  # GET /api/v1/clusters/{id}/nodes reads the pods KubeRay owns
+  # (label ray.io/cluster=<id>) to build the head + worker-group breakdown.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
