@@ -17,7 +17,13 @@ spec:
       app.kubernetes.io/instance: {{ .Release.Name }}
   template:
     metadata:
-      labels: {{- include "mobula.labels" . | nindent 8 }}
+      labels:
+        {{- include "mobula.labels" . | nindent 8 }}
+        # Marks this as a Mobula control-plane pod (#86/#91): the tenant-allow
+        # NetworkPolicy admits ingress to Ray heads' 8265/10001 only from pods
+        # carrying this label, so the nodes/jobs/metrics proxies can reach the
+        # cluster's Ray dashboard/Job API.
+        mobula.dev/control-plane: "true"
       annotations:
         checksum/registry: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         checksum/auth: {{ include (print $.Template.BasePath "/auth-configmap.yaml") . | sha256sum }}
