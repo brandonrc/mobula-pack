@@ -35,8 +35,19 @@ rules:
   # Read-only pod visibility for the nodes tab (mobula#91, api-v1 §5.3):
   # GET /api/v1/clusters/{id}/nodes reads the pods KubeRay owns
   # (label ray.io/cluster=<id>) to build the head + worker-group breakdown.
+  # pods/log (get) backs the logs tab (api-v1 §5.6b): the kubectl-logs-
+  # equivalent tail of a cluster's head/worker pods.
   - apiGroups: [""]
     resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  # Read-only Event visibility for the events tab (api-v1 §5.6a):
+  # GET /api/v1/clusters/{id}/events lists core/v1 Events in the namespace and
+  # filters to the cluster's objects (scheduling / image-pull / probe events).
+  - apiGroups: [""]
+    resources: ["events"]
     verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
