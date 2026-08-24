@@ -163,7 +163,10 @@ ui:
     repository: ghcr.io/brandonrc/mobula-ui
     # Same advice as the control plane: pin a digest in production.
     tag: "latest"
-    pullPolicy: IfNotPresent
+    # Always with a mutable "latest" tag — IfNotPresent serves a node's stale
+    # cached image after a re-push to the same tag (a UI rollout then shows the
+    # old bundle). Pin a digest/sha and this can go back to IfNotPresent.
+    pullPolicy: Always
   resources:
     requests:
       cpu: 50m
