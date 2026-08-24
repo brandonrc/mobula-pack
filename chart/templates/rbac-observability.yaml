@@ -1,0 +1,59 @@
+{{- if and .Values.kuberay.enabled .Values.rbac.observability.create }}
+{{- $kuberayNs := include "mobula.kuberayNamespace" . }}
+# Durable observability + netpol-reaper RBAC — a SEPARATE Role from the
+# `-kuberay` Role above, on purpose (mobula#110).
+#
+# Helm's 3-way strategic merge silently no-ops edits to an EXISTING Role's
+# `rules` array on `helm upgrade`: once a `-kuberay` Role is installed, later
+# chart additions to its rules never take. So the verbs the observability
+# endpoints and the tier-2 netpol reaper need are shipped in their OWN Role,
+# which helm creates in full on any install and can therefore keep correct.
+# (This is the chart form of the standalone `mobula-observability` Role that
+# had to be applied by hand on the grace playground; fresh installs of the
+# chart no longer need that manual step.)
+#
+# Same namespace as `-kuberay` ({{ $kuberayNs }} = mobula.kuberayNamespace):
+#   - pods get/list, pods/log get, events get/list — read visibility over the
+#     Ray pods KubeRay owns, backing the nodes/logs/events tabs
+#     (api-v1 §5.3/§5.6). Mirrors the `-kuberay` reads so they land even when
+#     a stale `-kuberay` Role predates them.
+#   - networking.k8s.io networkpolicies watch + delete — the verbs the tier-2
+#     reaper needs to observe and tear down the per-cluster
+#     `mobula-cluster-<id>` tenant-allow policies. The `-kuberay` Role grants
+#     networkpolicies get/list/create/patch but NOT watch/delete, and the
+#     3-way merge won't add them there — so they live here instead.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "mobula.name" . }}-observability
+  namespace: {{ $kuberayNs }}
+  labels: {{- include "mobula.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["watch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "mobula.name" . }}-observability
+  namespace: {{ $kuberayNs }}
+  labels: {{- include "mobula.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "mobula.name" . }}-observability
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "mobula.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

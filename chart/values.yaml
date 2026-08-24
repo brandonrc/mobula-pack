@@ -98,6 +98,15 @@ rbac:
   # Create the Role/RoleBinding + ClusterRole/ClusterRoleBinding for the
   # kuberay lifecycle path. Only rendered when kuberay.enabled.
   create: true
+  # A SEPARATE Role/RoleBinding (<name>-observability) carrying the
+  # observability read verbs (pods, pods/log, events) and the tier-2 netpol
+  # reaper verbs (networkpolicies watch/delete). Kept out of the -kuberay
+  # Role on purpose: helm's 3-way merge silently no-ops rule additions to an
+  # existing Role, so shipping these in their own resource is the only way an
+  # upgrade reliably applies them (mobula#110). Only rendered when
+  # kuberay.enabled.
+  observability:
+    create: true
 
 # --- Governance policy ------------------------------------------------------
 # Optional boot-time policy TOML ([prices], [quotas], [gpu], [pod_shaping]),
