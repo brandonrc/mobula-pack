@@ -5,12 +5,23 @@ metadata:
   name: {{ include "mobula.name" . }}
   labels: {{- include "mobula.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  {{- if eq .Values.database.kind "postgres" }}
+  # Postgres store (mobula#104): multiple writers are safe, so run
+  # replicaCount pods behind a RollingUpdate for HA and zero-downtime rolls.
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: RollingUpdate
+  {{- else }}
+  {{- if gt (int .Values.replicaCount) 1 }}
+  {{- fail "replicaCount>1 requires database.kind=postgres (SQLite is a single writer on an RWO PVC)" }}
+  {{- end }}
   # Recreate, not RollingUpdate: state is SQLite on an RWO PVC — a second
   # writer during a roll would either fail to attach the volume or corrupt
-  # the database.
+  # the database. Single replica.
+  replicas: 1
   strategy:
     type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "mobula.name" . }}
@@ -65,8 +76,16 @@ spec:
             {{- if .Values.allowInsecureTransport }}
             - --allow-insecure-transport
             {{- end }}
+            {{- if eq .Values.database.kind "postgres" }}
+            - --db={{ required "database.postgres.dsn is required when database.kind=postgres" .Values.database.postgres.dsn }}
+            {{- else }}
             - --db=/data/mobula.db
-            {{- if .Values.auditLog.enabled }}
+            {{- end }}
+            {{- if and .Values.auditLog.enabled (eq .Values.database.kind "sqlite") }}
+            # File audit sink only for the single-writer SQLite backend. With
+            # Postgres/HA the audit trail persists to the audit_events table
+            # (served by GET /api/v1/audit); a shared file across replicas
+            # would interleave writes.
             - --audit-log=/data/audit.jsonl
             {{- end }}
             {{- if .Values.kuberay.enabled }}
@@ -121,10 +140,12 @@ spec:
           resources: {{- toYaml .Values.resources | nindent 12 }}
       volumes:
         - name: data
-          {{- if .Values.persistence.enabled }}
+          {{- if and (eq .Values.database.kind "sqlite") .Values.persistence.enabled }}
           persistentVolumeClaim:
             claimName: {{ include "mobula.name" . }}-data
           {{- else }}
+          # Postgres backend (or persistence disabled): /data is scratch only
+          # (no SQLite file, no shared audit file). emptyDir keeps it per-pod.
           emptyDir: {}
           {{- end }}
         {{- if .Values.clusters }}

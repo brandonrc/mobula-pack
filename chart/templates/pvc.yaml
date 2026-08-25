@@ -1,4 +1,4 @@
-{{- if .Values.persistence.enabled }}
+{{- if and (eq .Values.database.kind "sqlite") .Values.persistence.enabled }}
 # SQLite state (--db=/data/mobula.db) + optional audit log. RWO: the
 # Deployment runs a single replica with strategy Recreate.
 apiVersion: v1

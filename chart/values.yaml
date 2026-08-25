@@ -11,6 +11,29 @@ image:
 
 bind: 0.0.0.0:8484
 
+# Number of control-plane replicas. >1 requires database.kind=postgres (HA):
+# SQLite is a single writer on an RWO PVC, so the chart pins replicas to 1 and
+# uses strategy Recreate whenever database.kind=sqlite, regardless of this value.
+replicaCount: 1
+
+# --- State backend (mobula#104, ADR-0004) -----------------------------------
+# kind selects the store:
+#   sqlite   - (default) SQLite file on a PVC (--db=/data/mobula.db). Single
+#              writer: replicaCount is forced to 1 and the roll strategy is
+#              Recreate. See `persistence` below.
+#   postgres - external Postgres (--db=<dsn>). Enables replicaCount>1 with a
+#              RollingUpdate; no PVC is used (state lives in Postgres). The
+#              schema is auto-created on first connect.
+database:
+  kind: sqlite
+  postgres:
+    # DSN passed to mobula's --db (postgres:// or postgresql://). REQUIRED when
+    # kind=postgres. SECURITY: the current server image takes the DSN as a CLI
+    # arg, so it is visible in the pod spec (`kubectl get pod -o yaml`). Keep
+    # the password in a Secret and rotate it; an env-sourced DSN (MOBULA_DB,
+    # secretKeyRef) is a tracked hardening follow-up on the server (mobula#104).
+    dsn: ""
+
 # --- Authentication ---------------------------------------------------------
 # auth.mode selects how callers authenticate to the control plane:
 #   oidc  - (default) validate Bearer JWTs against auth.oidc.* (Keycloak on a
