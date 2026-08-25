@@ -143,10 +143,15 @@ rbac:
     create: true
 
 # --- Governance policy ------------------------------------------------------
-# Optional boot-time policy TOML ([prices], [quotas], [gpu], [pod_shaping]),
-# rendered verbatim into a ConfigMap and passed --policy. This SEEDS the
-# store's policy row; once edited via PUT /api/v1/settings/policy the store
-# wins. See deploy/policy.toml in the mobula repo for a full example.
+# Optional boot-time policy TOML ([prices], [quotas], [budgets], [gpu],
+# [pod_shaping]), rendered verbatim into a ConfigMap and passed --policy. This
+# SEEDS the store's policy row; once edited via PUT /api/v1/settings/policy the
+# store wins. See deploy/policy.toml in the mobula repo for a full example.
+#
+# [quotas] cap CONCURRENT live demand per project; [budgets] cap CUMULATIVE
+# resource-hours consumed over a trailing window (mobula#77) — window_secs plus
+# resource-hours keys (cpu=core-hours, memory=GiB-hours, nvidia.com/gpu=
+# GPU-hours). Remaining budget is surfaced on GET /api/v1/usage.
 policy:
   enabled: false
   toml: ""
@@ -156,6 +161,9 @@ policy:
   #   "nvidia.com/gpu" = 2.80
   #   [quotas]
   #   dev = { cpu = 500, memory = 1000, "nvidia.com/gpu" = 16 }
+  #   [budgets]
+  #   # 500 GPU-hours / 7 days for ml-team (604800s window):
+  #   ml-team = { window_secs = 604800, "nvidia.com/gpu" = 500, cpu = 20000 }
 
 # --- Static cluster registry (job gateway) ----------------------------------
 # Pre-registered Ray clusters for the federating job gateway (e.g. a shared
