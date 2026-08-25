@@ -19,4 +19,29 @@ data:
     developer = {{ .Values.auth.oidc.roles.developer | default list | toJson }}
     viewer = {{ .Values.auth.oidc.roles.viewer | default list | toJson }}
     auditor = {{ .Values.auth.oidc.roles.auditor | default list | toJson }}
+{{- with .Values.auth.oidc.projectRoles }}
+
+    # #103: group->project-role automation. A caller in a matching group holds
+    # the mapped role scoped to project:<group> (after stripPrefix), with NO
+    # manual assignment. "*" => every group derives its own project role.
+    [project_roles]
+    {{- if .stripPrefix }}
+    strip_prefix = {{ .stripPrefix | quote }}
+    {{- end }}
+    {{- with .admin }}
+    admin = {{ . | toJson }}
+    {{- end }}
+    {{- with .operator }}
+    operator = {{ . | toJson }}
+    {{- end }}
+    {{- with .developer }}
+    developer = {{ . | toJson }}
+    {{- end }}
+    {{- with .viewer }}
+    viewer = {{ . | toJson }}
+    {{- end }}
+    {{- with .auditor }}
+    auditor = {{ . | toJson }}
+    {{- end }}
+{{- end }}
 {{- end }}

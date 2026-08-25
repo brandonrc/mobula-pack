@@ -45,6 +45,17 @@ auth:
       developer: []       # e.g. ["/ml-eng"]
       viewer: []          # e.g. ["*"]
       auditor: []         # audit-trail readers (compliance)
+    # #103: group->project-role automation (self-service). A caller in a
+    # matching group automatically holds the mapped role scoped to
+    # project:<group> (after stripPrefix), with NO manual `PUT
+    # /access/assignments`. "*" => every group the caller is in derives its own
+    # project role — the plain `team-a member => operator on project:team-a`
+    # rule. Omit/leave empty to keep it off (deny-by-default). operator and
+    # developer are the meaningful entries.
+    projectRoles: {}
+      # operator: ["*"]         # every group => operator on its own project
+      # developer: []
+      # stripPrefix: ""         # e.g. "/" for Keycloak "/team-a" groups
   local:
     # Optional Secret providing the bootstrap admin password. The value of
     # `passwordKey` in this Secret becomes MOBULA_LOCAL_ADMIN_PASSWORD.
